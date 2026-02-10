@@ -1,78 +1,73 @@
 import * as cheerio from "cheerio";
 import type { ScrapeResult } from "@/lib/types";
 
+// Slugify title for URL construction
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Remove accents
+    .replace(/[^a-z0-9]+/g, "-") // Replace non-alphanumeric with dashes
+    .replace(/^-+|-+$/g, ""); // Remove leading/trailing dashes
+}
+
+// Helper to fetch with retry
+async function fetchWithRetry(url: string, retries = 3): Promise<string | null> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+          "Accept-Encoding": "gzip, deflate, br",
+          Connection: "keep-alive",
+          "Upgrade-Insecure-Requests": "1",
+        },
+        signal: AbortSignal.timeout(20000),
+      });
+      
+      if (res.ok) {
+        return await res.text();
+      }
+    } catch (error) {
+      console.log(`[v0] Fetch attempt ${i + 1} failed for ${url}`);
+      if (i === retries - 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+  return null;
+}
+
 export async function scrapeTopStreamMovie(
   baseUrl: string,
   tmdbId: number,
   title: string
 ): Promise<ScrapeResult | null> {
+  console.log(`[v0] Starting scrape for movie TMDB ${tmdbId}: ${title}`);
+  
   try {
-    const searchUrl = `${baseUrl}/recherche/${encodeURIComponent(title)}`;
-
-    const searchRes = await fetch(searchUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!searchRes.ok) return null;
-
-    const searchHtml = await searchRes.text();
-    const $search = cheerio.load(searchHtml);
-
-    let movieUrl: string | null = null;
-    $search("a[href*='/film/'], a[href*='/movie/']").each((_, el) => {
-      const href = $search(el).attr("href");
-      if (href && !movieUrl) {
-        movieUrl = href.startsWith("http") ? href : `${baseUrl}${href}`;
-      }
-    });
-
-    if (!movieUrl) {
-      const directUrls = [
-        `${baseUrl}/film/${tmdbId}`,
-        `${baseUrl}/movie/${tmdbId}`,
-      ];
-      for (const url of directUrls) {
-        try {
-          const res = await fetch(url, {
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
-            redirect: "follow",
-            signal: AbortSignal.timeout(10000),
-          });
-          if (res.ok) {
-            movieUrl = url;
-            break;
-          }
-        } catch {
-          continue;
-        }
+    // Try to construct the URL directly from title
+    const slug = slugify(title);
+    const movieUrl = `${baseUrl}/movie/${slug}`;
+    
+    console.log(`[v0] Attempting movie URL: ${movieUrl}`);
+    
+    // Fetch the movie page
+    const html = await fetchWithRetry(movieUrl);
+    
+    if (html) {
+      const result = await extractPlayersFromPage(html, movieUrl, title);
+      if (result && result.players.length > 0) {
+        console.log(`[v0] Found ${result.players.length} players for movie ${title}`);
+        return result;
       }
     }
-
-    if (!movieUrl) return null;
-
-    const movieRes = await fetch(movieUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!movieRes.ok) return null;
-
-    const movieHtml = await movieRes.text();
-    return extractPlayers(movieHtml, movieUrl, title);
+    
+    // Fallback to search
+    console.log(`[v0] Direct URL failed, trying search...`);
+    return await searchAndScrape(baseUrl, title, "movie");
   } catch (error) {
     console.error(`[TopStream] Error scraping movie ${tmdbId}:`, error);
     return null;
@@ -86,9 +81,53 @@ export async function scrapeTopStreamSeries(
   season?: number,
   episode?: number
 ): Promise<ScrapeResult | null> {
+  console.log(`[v0] Starting scrape for series TMDB ${tmdbId}: ${title} S${season}E${episode}`);
+  
+  try {
+    // Try to construct the URL directly
+    const slug = slugify(title);
+    let targetUrl = `${baseUrl}/serie/${slug}`;
+    
+    if (season !== undefined) {
+      targetUrl = `${baseUrl}/serie/${slug}/saison-${season}`;
+      if (episode !== undefined) {
+        targetUrl = `${baseUrl}/serie/${slug}/saison-${season}/episode-${episode}`;
+      }
+    }
+    
+    console.log(`[v0] Attempting series URL: ${targetUrl}`);
+    
+    // Fetch the series page
+    const html = await fetchWithRetry(targetUrl);
+    
+    if (html) {
+      const result = await extractPlayersFromPage(html, targetUrl, title, season, episode);
+      if (result && result.players.length > 0) {
+        console.log(`[v0] Found ${result.players.length} players for series ${title}`);
+        return result;
+      }
+    }
+    
+    // Fallback to search
+    console.log(`[v0] Direct URL failed, trying search...`);
+    return await searchAndScrape(baseUrl, title, "series", season, episode);
+  } catch (error) {
+    console.error(`[TopStream] Error scraping series ${tmdbId}:`, error);
+    return null;
+  }
+}
+
+// Search and scrape helper
+async function searchAndScrape(
+  baseUrl: string,
+  title: string,
+  type: "movie" | "series" | "anime",
+  season?: number,
+  episode?: number
+): Promise<ScrapeResult | null> {
   try {
     const searchUrl = `${baseUrl}/recherche/${encodeURIComponent(title)}`;
-
+    
     const searchRes = await fetch(searchUrl, {
       headers: {
         "User-Agent":
@@ -104,70 +143,231 @@ export async function scrapeTopStreamSeries(
     const searchHtml = await searchRes.text();
     const $search = cheerio.load(searchHtml);
 
-    let seriesUrl: string | null = null;
-    $search(
-      "a[href*='/serie/'], a[href*='/series/'], a[href*='/anime/']"
-    ).each((_, el) => {
+    let contentUrl: string | null = null;
+    const selector = type === "movie" 
+      ? "a[href*='/movie/'], a[href*='/film/']"
+      : "a[href*='/serie/'], a[href*='/series/'], a[href*='/anime/']";
+    
+    $search(selector).each((_, el) => {
       const href = $search(el).attr("href");
-      if (href && !seriesUrl) {
-        seriesUrl = href.startsWith("http") ? href : `${baseUrl}${href}`;
+      if (href && !contentUrl) {
+        contentUrl = href.startsWith("http") ? href : `${baseUrl}${href}`;
       }
     });
 
-    if (!seriesUrl) {
-      const directUrls = [
-        `${baseUrl}/serie/${tmdbId}`,
-        `${baseUrl}/series/${tmdbId}`,
-        `${baseUrl}/anime/${tmdbId}`,
-      ];
-      for (const url of directUrls) {
-        try {
-          const res = await fetch(url, {
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
-            redirect: "follow",
-            signal: AbortSignal.timeout(10000),
-          });
-          if (res.ok) {
-            seriesUrl = url;
-            break;
+    if (!contentUrl) return null;
+
+    // Append season/episode to URL if needed
+    if (season !== undefined && type !== "movie") {
+      contentUrl = `${contentUrl}/saison-${season}`;
+      if (episode !== undefined) {
+        contentUrl = `${contentUrl}/episode-${episode}`;
+      }
+    }
+
+    const html = await fetchWithRetry(contentUrl);
+    if (html) {
+      return await extractPlayersFromPage(html, contentUrl, title, season, episode);
+    }
+    return null;
+  } catch (error) {
+    console.error("[TopStream] Search failed:", error);
+    return null;
+  }
+}
+
+// Main extraction function - extracts all embed/player URLs from HTML
+async function extractPlayersFromPage(
+  html: string,
+  sourceUrl: string,
+  title: string,
+  season?: number,
+  episode?: number
+): Promise<ScrapeResult | null> {
+  try {
+    console.log(`[v0] Extracting players from page...`);
+    
+    const $ = cheerio.load(html);
+    const players: ScrapeResult["players"] = [];
+    
+    // Method 1: Look for /embed/ URLs in the HTML
+    const embedRegex = /https?:\/\/[^"'\s]+\/embed\/\d+/gi;
+    const embedMatches = html.match(embedRegex);
+    
+    if (embedMatches) {
+      console.log(`[v0] Found ${embedMatches.length} /embed/ URLs in HTML`);
+      for (const embedUrl of embedMatches) {
+        if (!players.find(p => p.embed_url === embedUrl)) {
+          console.log(`[v0] Processing embed URL: ${embedUrl}`);
+          
+          // Scrape the embed page to get actual player
+          const embeddedPlayers = await scrapeEmbedPage(embedUrl);
+          for (const player of embeddedPlayers) {
+            if (!players.find(p => p.embed_url === player.embed_url)) {
+              players.push({
+                ...player,
+                season,
+                episode
+              });
+            }
           }
-        } catch {
-          continue;
         }
       }
     }
-
-    if (!seriesUrl) return null;
-
-    let targetUrl = seriesUrl;
-    if (season !== undefined) {
-      targetUrl = `${seriesUrl}/saison-${season}`;
-      if (episode !== undefined) {
-        targetUrl = `${seriesUrl}/saison-${season}/episode-${episode}`;
+    
+    // Method 2: Extract direct iframes
+    $("iframe").each((_, el) => {
+      const src = $(el).attr("src") || $(el).attr("data-src");
+      if (src && src.startsWith("http") && isPlayerUrl(src)) {
+        if (!players.find(p => p.embed_url === src)) {
+          console.log(`[v0] Found iframe: ${src}`);
+          players.push({
+            player_name: extractPlayerName(src),
+            embed_url: src,
+            quality: "HD",
+            language: "VF",
+            season,
+            episode,
+            player_type: "iframe",
+          });
+        }
       }
-    }
+    });
+    
+    // Method 3: Extract from data attributes
+    $("[data-url], [data-src], [data-link], [data-embed]").each((_, el) => {
+      const url =
+        $(el).attr("data-url") ||
+        $(el).attr("data-src") ||
+        $(el).attr("data-link") ||
+        $(el).attr("data-embed");
+      
+      if (url && url.startsWith("http") && isPlayerUrl(url)) {
+        if (!players.find(p => p.embed_url === url)) {
+          console.log(`[v0] Found data attribute URL: ${url}`);
+          players.push({
+            player_name: $(el).text().trim() || extractPlayerName(url),
+            embed_url: url,
+            quality: extractQuality($(el).text()),
+            language: extractLanguage($(el).text()),
+            season,
+            episode,
+            player_type: "iframe",
+          });
+        }
+      }
+    });
+    
+    // Method 4: Extract from script tags
+    $("script").each((_, el) => {
+      const scriptContent = $(el).html();
+      if (scriptContent) {
+        // Look for player URLs in scripts
+        const urlMatches = scriptContent.match(/https?:\/\/[^\s"'\\)]+/g);
+        if (urlMatches) {
+          for (const url of urlMatches) {
+            if (isPlayerUrl(url) && !players.find(p => p.embed_url === url)) {
+              console.log(`[v0] Found URL in script: ${url}`);
+              players.push({
+                player_name: extractPlayerName(url),
+                embed_url: url,
+                quality: "HD",
+                language: "VF",
+                season,
+                episode,
+                player_type: "iframe",
+              });
+            }
+          }
+        }
+      }
+    });
+    
+    console.log(`[v0] Total players found: ${players.length}`);
+    
+    const pageTitle = $("h1").first().text().trim() || $("title").text().trim() || title;
+    
+    return {
+      title: pageTitle,
+      source_url: sourceUrl,
+      players,
+    };
+  } catch (error) {
+    console.error("[TopStream] Page extraction failed:", error);
+    return null;
+  }
+}
 
-    const pageRes = await fetch(targetUrl, {
+// Scrape the /embed/ page to get actual player URLs
+async function scrapeEmbedPage(embedUrl: string): Promise<Array<{player_name: string, embed_url: string, quality: string, language: string, player_type: string}>> {
+  const players: Array<{player_name: string, embed_url: string, quality: string, language: string, player_type: string}> = [];
+  
+  try {
+    console.log(`[v0] Scraping embed page: ${embedUrl}`);
+    
+    const res = await fetch(embedUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+        Referer: embedUrl.split("/embed/")[0],
       },
       signal: AbortSignal.timeout(15000),
     });
 
-    if (!pageRes.ok) return null;
+    if (!res.ok) return players;
 
-    const pageHtml = await pageRes.text();
-    return extractPlayers(pageHtml, targetUrl, title, season, episode);
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    // Extract iframes
+    $("iframe").each((_, el) => {
+      const src = $(el).attr("src") || $(el).attr("data-src");
+      if (src && src.startsWith("http") && isPlayerUrl(src)) {
+        console.log(`[v0] Found player in embed: ${src}`);
+        players.push({
+          player_name: extractPlayerName(src),
+          embed_url: src,
+          quality: "HD",
+          language: "VF",
+          player_type: "iframe",
+        });
+      }
+    });
+
+    // Extract from script tags
+    $("script").each((_, el) => {
+      const scriptContent = $(el).html();
+      if (scriptContent) {
+        const embedMatches = scriptContent.match(
+          /(?:src|url|file|source)\s*[:=]\s*['"](https?:\/\/[^'"]+)['"]/gi
+        );
+        if (embedMatches) {
+          for (const match of embedMatches) {
+            const urlMatch = match.match(/https?:\/\/[^'"]+/);
+            if (
+              urlMatch &&
+              isPlayerUrl(urlMatch[0]) &&
+              !players.find((p) => p.embed_url === urlMatch[0])
+            ) {
+              console.log(`[v0] Found player in script: ${urlMatch[0]}`);
+              players.push({
+                player_name: extractPlayerName(urlMatch[0]),
+                embed_url: urlMatch[0],
+                quality: "HD",
+                language: "VF",
+                player_type: "iframe",
+              });
+            }
+          }
+        }
+      }
+    });
   } catch (error) {
-    console.error(`[TopStream] Error scraping series ${tmdbId}:`, error);
-    return null;
+    console.error("[TopStream] Embed scrape failed:", error);
   }
+
+  return players;
 }
 
 /** Scrape the listing page of a source to get all content links */
@@ -251,115 +451,7 @@ export async function scrapeTopStreamListing(
   return results;
 }
 
-function extractPlayers(
-  html: string,
-  sourceUrl: string,
-  title: string,
-  season?: number,
-  episode?: number
-): ScrapeResult {
-  const $ = cheerio.load(html);
-  const players: ScrapeResult["players"] = [];
 
-  // Extract iframe sources
-  $("iframe").each((_, el) => {
-    const src = $(el).attr("src") || $(el).attr("data-src");
-    if (src && src.startsWith("http")) {
-      const playerName = extractPlayerName(src);
-      players.push({
-        player_name: playerName,
-        embed_url: src,
-        quality: "HD",
-        language: "VF",
-        season,
-        episode,
-        player_type: "iframe",
-      });
-    }
-  });
-
-  // Extract from player buttons/tabs
-  $(
-    '[data-url], [data-src], [data-link], [data-embed], .player-btn, .player-tab, [onclick*="http"]'
-  ).each((_, el) => {
-    const url =
-      $(el).attr("data-url") ||
-      $(el).attr("data-src") ||
-      $(el).attr("data-link") ||
-      $(el).attr("data-embed");
-
-    if (url && url.startsWith("http")) {
-      const name =
-        $(el).text().trim() || $(el).attr("title") || extractPlayerName(url);
-      if (!players.find((p) => p.embed_url === url)) {
-        players.push({
-          player_name: name,
-          embed_url: url,
-          quality: extractQuality($(el).text()),
-          language: extractLanguage($(el).text()),
-          season,
-          episode,
-          player_type: "iframe",
-        });
-      }
-    }
-
-    const onclick = $(el).attr("onclick");
-    if (onclick) {
-      const urlMatch = onclick.match(/https?:\/\/[^\s'"\\)]+/);
-      if (urlMatch && !players.find((p) => p.embed_url === urlMatch[0])) {
-        players.push({
-          player_name: $(el).text().trim() || extractPlayerName(urlMatch[0]),
-          embed_url: urlMatch[0],
-          quality: "HD",
-          language: "VF",
-          season,
-          episode,
-          player_type: "iframe",
-        });
-      }
-    }
-  });
-
-  // Extract from script tags
-  $("script").each((_, el) => {
-    const scriptContent = $(el).html();
-    if (scriptContent) {
-      const embedMatches = scriptContent.match(
-        /(?:src|url|link|embed)\s*[:=]\s*['"](https?:\/\/[^'"]+)['"]/gi
-      );
-      if (embedMatches) {
-        for (const match of embedMatches) {
-          const urlMatch = match.match(/https?:\/\/[^'"]+/);
-          if (
-            urlMatch &&
-            isPlayerUrl(urlMatch[0]) &&
-            !players.find((p) => p.embed_url === urlMatch[0])
-          ) {
-            players.push({
-              player_name: extractPlayerName(urlMatch[0]),
-              embed_url: urlMatch[0],
-              quality: "HD",
-              language: "VF",
-              season,
-              episode,
-              player_type: "iframe",
-            });
-          }
-        }
-      }
-    }
-  });
-
-  const pageTitle =
-    $("h1").first().text().trim() || $("title").text().trim() || title;
-
-  return {
-    title: pageTitle,
-    source_url: sourceUrl,
-    players,
-  };
-}
 
 function extractPlayerName(url: string): string {
   try {
