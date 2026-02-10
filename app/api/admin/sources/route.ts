@@ -9,7 +9,7 @@ export async function GET() {
 
   const sql = getDb();
   const sources = await sql`SELECT * FROM sources ORDER BY created_at DESC`;
-  return NextResponse.json(sources);
+  return NextResponse.json({ sources: Array.from(sources) });
 }
 
 export async function POST(request: Request) {

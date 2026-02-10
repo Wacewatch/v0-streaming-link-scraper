@@ -20,10 +20,11 @@ interface ContentItem {
 }
 
 export function ContentBrowser() {
-  const { data: content, mutate } = useSWR<ContentItem[]>(
+  const { data, mutate } = useSWR<{ items: ContentItem[] }>(
     "/api/admin/content",
     fetcher
   );
+  const content = data?.items;
 
   async function handleDelete(id: number) {
     if (!confirm("Supprimer ce contenu et tous ses lecteurs ?")) return;

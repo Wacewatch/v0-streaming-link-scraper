@@ -39,10 +39,11 @@ interface Source {
 }
 
 export function SourcesManager() {
-  const { data: sources, mutate } = useSWR<Source[]>(
+  const { data, mutate } = useSWR<{ sources: Source[] }>(
     "/api/admin/sources",
     fetcher
   );
+  const sources = data?.sources;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<Source | null>(null);
   const [formData, setFormData] = useState({

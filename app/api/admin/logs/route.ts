@@ -16,5 +16,5 @@ export async function GET() {
     LIMIT 50
   `;
 
-  return NextResponse.json(logs);
+  return NextResponse.json({ logs: Array.from(logs) });
 }

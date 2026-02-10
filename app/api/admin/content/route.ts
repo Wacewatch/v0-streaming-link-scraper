@@ -20,7 +20,7 @@ export async function GET() {
     LIMIT 100
   `;
 
-  return NextResponse.json(content);
+  return NextResponse.json({ items: Array.from(content) });
 }
 
 export async function DELETE(request: Request) {

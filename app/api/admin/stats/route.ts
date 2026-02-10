@@ -27,6 +27,6 @@ export async function GET() {
     players: parseInt(playersCount.count),
     movies: parseInt(moviesCount.count),
     series: parseInt(seriesCount.count),
-    recent_logs: recentLogs,
+    recent_logs: Array.from(recentLogs),
   });
 }
