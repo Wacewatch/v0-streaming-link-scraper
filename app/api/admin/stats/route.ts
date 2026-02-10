@@ -11,7 +11,7 @@ export async function GET() {
 
   const [sourcesCount] = await sql`SELECT COUNT(*) as count FROM sources`;
   const [contentCount] = await sql`SELECT COUNT(*) as count FROM scraped_content`;
-  const [playersCount] = await sql`SELECT COUNT(*) as count FROM players WHERE is_active = true`;
+  const [linksCount] = await sql`SELECT COUNT(*) as count FROM stream_links WHERE is_active = true`;
   const [moviesCount] = await sql`SELECT COUNT(DISTINCT tmdb_id) as count FROM scraped_content WHERE content_type = 'movie'`;
   const [seriesCount] = await sql`SELECT COUNT(DISTINCT tmdb_id) as count FROM scraped_content WHERE content_type IN ('series', 'anime')`;
   const recentLogs = await sql`
@@ -24,7 +24,7 @@ export async function GET() {
   return NextResponse.json({
     sources: parseInt(sourcesCount.count),
     content: parseInt(contentCount.count),
-    players: parseInt(playersCount.count),
+    stream_links: parseInt(linksCount.count),
     movies: parseInt(moviesCount.count),
     series: parseInt(seriesCount.count),
     recent_logs: Array.from(recentLogs),

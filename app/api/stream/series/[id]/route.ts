@@ -37,51 +37,51 @@ export async function GET(
     if (existing.length > 0) {
       const sources = [];
       for (const content of existing) {
-        let playersQuery;
+        let streamsQuery;
         if (season && episode) {
-          playersQuery = await sql`
-            SELECT * FROM players 
+          streamsQuery = await sql`
+            SELECT * FROM stream_links 
             WHERE content_id = ${content.id} AND is_active = true
             AND season = ${parseInt(season)} AND episode = ${parseInt(episode)}
-            ORDER BY player_name
+            ORDER BY quality, host
           `;
         } else if (season) {
-          playersQuery = await sql`
-            SELECT * FROM players 
+          streamsQuery = await sql`
+            SELECT * FROM stream_links 
             WHERE content_id = ${content.id} AND is_active = true
             AND season = ${parseInt(season)}
-            ORDER BY episode, player_name
+            ORDER BY episode, quality, host
           `;
         } else {
-          playersQuery = await sql`
-            SELECT * FROM players 
+          streamsQuery = await sql`
+            SELECT * FROM stream_links 
             WHERE content_id = ${content.id} AND is_active = true
-            ORDER BY season, episode, player_name
+            ORDER BY season, episode, quality, host
           `;
         }
 
         const seasonsMap: Record<
           number,
-          Record<number, typeof playersQuery>
+          Record<number, typeof streamsQuery>
         > = {};
-        for (const p of playersQuery) {
-          const s = p.season || 1;
-          const e = p.episode || 1;
-          if (!seasonsMap[s]) seasonsMap[s] = {};
-          if (!seasonsMap[s][e]) seasonsMap[s][e] = [];
-          seasonsMap[s][e].push(p);
+        for (const s of streamsQuery) {
+          const sn = s.season || 1;
+          const ep = s.episode || 1;
+          if (!seasonsMap[sn]) seasonsMap[sn] = {};
+          if (!seasonsMap[sn][ep]) seasonsMap[sn][ep] = [];
+          seasonsMap[sn][ep].push(s);
         }
 
         const seasons = Object.entries(seasonsMap).map(([s, episodes]) => ({
           season: parseInt(s),
-          episodes: Object.entries(episodes).map(([e, players]) => ({
+          episodes: Object.entries(episodes).map(([e, streams]) => ({
             episode: parseInt(e),
-            players: players.map((p: Record<string, string>) => ({
-              name: p.player_name,
-              embed_url: p.embed_url,
-              quality: p.quality,
-              language: p.language,
-              type: p.player_type,
+            streams: streams.map((st: Record<string, unknown>) => ({
+              m3u8_url: st.m3u8_url,
+              quality: st.quality,
+              language: st.language,
+              host: st.host,
+              headers: st.headers,
             })),
           })),
         }));
@@ -119,12 +119,12 @@ export async function GET(
           episodes: [
             {
               episode: episode ? parseInt(episode) : 1,
-              players: result.players.map((p) => ({
-                name: p.player_name,
-                embed_url: p.embed_url,
-                quality: p.quality || "HD",
-                language: p.language || "VF",
-                type: p.player_type || "iframe",
+              streams: result.links.map((l) => ({
+                m3u8_url: l.m3u8_url,
+                quality: l.quality || "auto",
+                language: l.language || "VF",
+                host: l.host || "unknown",
+                headers: l.headers || {},
               })),
             },
           ],

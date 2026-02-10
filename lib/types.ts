@@ -21,16 +21,16 @@ export interface ScrapedContent {
   updated_at: string;
 }
 
-export interface Player {
+export interface StreamLink {
   id: number;
   content_id: number;
-  player_name: string;
-  embed_url: string;
+  m3u8_url: string;
   quality: string;
   language: string;
   season: number | null;
   episode: number | null;
-  player_type: string;
+  host: string;
+  headers: Record<string, string>;
   is_active: boolean;
   last_checked: string;
   created_at: string;
@@ -49,30 +49,29 @@ export interface ScrapeLog {
 export interface ScrapeResult {
   title: string;
   source_url: string;
-  players: {
-    player_name: string;
-    embed_url: string;
+  links: {
+    m3u8_url: string;
     quality?: string;
     language?: string;
     season?: number;
     episode?: number;
-    player_type?: string;
+    host?: string;
+    headers?: Record<string, string>;
   }[];
 }
 
-export interface ApiResponse {
+export interface ApiMovieResponse {
   tmdb_id: number;
   content_type: string;
   title: string;
   sources: {
     source_name: string;
     source_url: string;
-    players: {
-      name: string;
-      embed_url: string;
+    streams: {
+      m3u8_url: string;
       quality: string;
       language: string;
-      type: string;
+      host: string;
     }[];
   }[];
 }
@@ -88,12 +87,11 @@ export interface ApiSeriesResponse {
       season: number;
       episodes: {
         episode: number;
-        players: {
-          name: string;
-          embed_url: string;
+        streams: {
+          m3u8_url: string;
           quality: string;
           language: string;
-          type: string;
+          host: string;
         }[];
       }[];
     }[];

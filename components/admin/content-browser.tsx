@@ -15,7 +15,7 @@ interface ContentItem {
   title: string;
   source_name: string;
   source_url: string;
-  player_count: number;
+  link_count: number;
   updated_at: string;
 }
 
@@ -27,7 +27,7 @@ export function ContentBrowser() {
   const content = data?.items;
 
   async function handleDelete(id: number) {
-    if (!confirm("Supprimer ce contenu et tous ses lecteurs ?")) return;
+    if (!confirm("Supprimer ce contenu et tous ses liens m3u8 ?")) return;
     await fetch(`/api/admin/content?id=${id}`, { method: "DELETE" });
     mutate();
   }
@@ -68,7 +68,7 @@ export function ContentBrowser() {
                         {item.source_name}
                       </span>
                       <Badge className="text-xs">
-                        {item.player_count} lecteur(s)
+                        {item.link_count} lien(s) m3u8
                       </Badge>
                     </div>
                   </div>

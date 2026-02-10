@@ -75,9 +75,9 @@ export async function POST(request: Request) {
         await sql`
           UPDATE scrape_logs SET 
             status = 'success', 
-            items_found = ${stats.players_found},
+            items_found = ${stats.links_found},
             finished_at = NOW(),
-            message = ${`${stats.title}: ${stats.seasons_scraped} saisons, ${stats.episodes_scraped} episodes, ${stats.players_found} lecteurs`}
+            message = ${`${stats.title}: ${stats.seasons_scraped} saisons, ${stats.episodes_scraped} episodes, ${stats.links_found} liens m3u8`}
           WHERE source_id = ${sourceId} AND status = 'running'
           AND id = (SELECT MAX(id) FROM scrape_logs WHERE source_id = ${sourceId} AND status = 'running')
         `;
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // Single scrape by TMDB ID only
+    // Single scrape by TMDB ID
     const { tmdb_id, content_type, season, episode } = body;
 
     if (!tmdb_id || !content_type) {
@@ -119,8 +119,8 @@ export async function POST(request: Request) {
       episode
     );
 
-    const totalPlayers = results.reduce(
-      (sum, r) => sum + r.result.players.length,
+    const totalLinks = results.reduce(
+      (sum, r) => sum + r.result.links.length,
       0
     );
 
@@ -128,9 +128,9 @@ export async function POST(request: Request) {
       await sql`
         UPDATE scrape_logs SET 
           status = 'success', 
-          items_found = ${totalPlayers},
+          items_found = ${totalLinks},
           finished_at = NOW(),
-          message = ${`Found ${totalPlayers} players from ${results.length} sources for "${title}"`}
+          message = ${`Found ${totalLinks} m3u8 link(s) from ${results.length} source(s) for "${title}"`}
         WHERE source_id = ${sourceId} AND status = 'running'
         AND id = (SELECT MAX(id) FROM scrape_logs WHERE source_id = ${sourceId} AND status = 'running')
       `;
@@ -140,11 +140,11 @@ export async function POST(request: Request) {
       success: true,
       title,
       sources_scraped: results.length,
-      players_found: totalPlayers,
+      links_found: totalLinks,
       results: results.map(({ source, result }) => ({
         source: source.name,
         title: result.title,
-        players: result.players.length,
+        links: result.links.length,
       })),
     });
   } catch (error) {

@@ -45,7 +45,7 @@ export function ApiDocs() {
       method: "GET",
       path: "/api/stream/movie/{TMDB_ID}",
       description:
-        "Recupere tous les lecteurs disponibles pour un film. Le titre est automatiquement recupere depuis TMDB.",
+        "Recupere les liens m3u8 disponibles pour un film. Le titre est automatiquement recupere depuis TMDB.",
       params: [],
       example: `${baseUrl}/api/stream/movie/550`,
       response: `{
@@ -56,13 +56,12 @@ export function ApiDocs() {
     {
       "source_name": "TopStream",
       "source_url": "https://top-stream.space/film/fight-club/",
-      "players": [
+      "streams": [
         {
-          "name": "Doodstream",
-          "embed_url": "https://doodstream.com/e/...",
-          "quality": "HD",
+          "m3u8_url": "https://cdn.example.com/stream/master.m3u8",
+          "quality": "1080p",
           "language": "VF",
-          "type": "iframe"
+          "host": "cdn.example.com"
         }
       ]
     }
@@ -74,7 +73,7 @@ export function ApiDocs() {
       method: "GET",
       path: "/api/stream/series/{TMDB_ID}",
       description:
-        "Recupere les lecteurs pour une serie/anime. Le titre est automatiquement recupere depuis TMDB. Filtrage optionnel par saison et episode.",
+        "Recupere les liens m3u8 pour une serie/anime. Filtrage optionnel par saison et episode.",
       params: [
         { name: "season", type: "query", desc: "Numero de saison (optionnel)" },
         {
@@ -103,13 +102,12 @@ export function ApiDocs() {
           "episodes": [
             {
               "episode": 1,
-              "players": [
+              "streams": [
                 {
-                  "name": "Doodstream",
-                  "embed_url": "https://...",
-                  "quality": "HD",
+                  "m3u8_url": "https://cdn.example.com/stream/s01e01.m3u8",
+                  "quality": "auto",
                   "language": "VF",
-                  "type": "iframe"
+                  "host": "cdn.example.com"
                 }
               ]
             }
@@ -131,19 +129,19 @@ export function ApiDocs() {
         </h2>
         <p className="text-sm text-muted-foreground">
           Endpoints publics -- seul le TMDB ID est necessaire, le titre est
-          automatiquement recupere
+          automatiquement recupere. Les reponses contiennent des liens m3u8 directs.
         </p>
       </div>
 
       <Card className="border-primary/20 bg-primary/5">
         <CardContent className="p-4">
           <p className="text-sm text-foreground">
-            Aucun parametre{" "}
+            L{"'"}API retourne des liens{" "}
             <code className="rounded bg-secondary px-1 py-0.5 font-mono text-xs text-primary">
-              title
+              m3u8
             </code>{" "}
-            necessaire ! Le titre est automatiquement recupere depuis l{"'"}API
-            TMDB a partir de l{"'"}ID.
+            directement lisibles par un lecteur HLS (hls.js, VLC, etc.), et non
+            des iframes ou des images.
           </p>
         </CardContent>
       </Card>

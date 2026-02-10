@@ -31,8 +31,8 @@ interface ScrapeResultData {
   success: boolean;
   title?: string;
   sources_scraped?: number;
-  players_found?: number;
-  results?: { source: string; title: string; players: number }[];
+  links_found?: number;
+  results?: { source: string; title: string; links: number }[];
   // Bulk source
   total?: number;
   success_count?: number;
@@ -158,7 +158,7 @@ export function ScrapePanel() {
           title: data.title,
           seasons_scraped: data.seasons_scraped,
           episodes_scraped: data.episodes_scraped,
-          players_found: data.players_found,
+          links_found: data.links_found,
         });
       } else {
         setError(data.error || "Echec du bulk scraping");
@@ -391,8 +391,8 @@ export function ScrapePanel() {
               {result.sources_scraped !== undefined && (
                 <Badge variant="secondary">{result.sources_scraped} source(s)</Badge>
               )}
-              {result.players_found !== undefined && (
-                <Badge variant="secondary">{result.players_found} lecteur(s)</Badge>
+              {result.links_found !== undefined && (
+                <Badge variant="secondary">{result.links_found} lien(s) m3u8</Badge>
               )}
               {result.total !== undefined && (
                 <Badge variant="secondary">{result.total} contenu(s) trouves</Badge>
@@ -425,7 +425,7 @@ export function ScrapePanel() {
                   </p>
                   <p className="text-xs text-muted-foreground">{r.title}</p>
                 </div>
-                <Badge>{r.players} lecteur(s)</Badge>
+                <Badge>{r.links} lien(s) m3u8</Badge>
               </div>
             ))}
 
