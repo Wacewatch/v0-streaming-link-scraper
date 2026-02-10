@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { scrapeAndStore } from "@/lib/scrapers";
+import { getTmdbMovieTitle } from "@/lib/tmdb";
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
@@ -27,10 +28,7 @@ export async function GET(
       WHERE sc.tmdb_id = ${tmdbId} AND sc.content_type = 'movie'
     `;
 
-    let responseData;
-
     if (existing.length > 0) {
-      // Return cached data
       const sources = [];
       for (const content of existing) {
         const players = await sql`
@@ -51,42 +49,37 @@ export async function GET(
         });
       }
 
-      responseData = {
+      return NextResponse.json({
         tmdb_id: tmdbId,
         content_type: "movie",
         title: existing[0].title,
         sources,
         cached: true,
-      };
-    } else {
-      // Scrape live - use title from query param or TMDB ID
-      const url = new URL(request.url);
-      const title = url.searchParams.get("title") || `${tmdbId}`;
-
-      const results = await scrapeAndStore(tmdbId, title, "movie");
-
-      const sources = results.map(({ source, result }) => ({
-        source_name: source.name,
-        source_url: result.source_url,
-        players: result.players.map((p) => ({
-          name: p.player_name,
-          embed_url: p.embed_url,
-          quality: p.quality || "HD",
-          language: p.language || "VF",
-          type: p.player_type || "iframe",
-        })),
-      }));
-
-      responseData = {
-        tmdb_id: tmdbId,
-        content_type: "movie",
-        title: results[0]?.result.title || title,
-        sources,
-        cached: false,
-      };
+      });
     }
 
-    return NextResponse.json(responseData);
+    // Scrape live using TMDB title
+    const { title, results } = await scrapeAndStore(tmdbId, "movie");
+
+    const sources = results.map(({ source, result }) => ({
+      source_name: source.name,
+      source_url: result.source_url,
+      players: result.players.map((p) => ({
+        name: p.player_name,
+        embed_url: p.embed_url,
+        quality: p.quality || "HD",
+        language: p.language || "VF",
+        type: p.player_type || "iframe",
+      })),
+    }));
+
+    return NextResponse.json({
+      tmdb_id: tmdbId,
+      content_type: "movie",
+      title: title || (await getTmdbMovieTitle(tmdbId)),
+      sources,
+      cached: false,
+    });
   } catch (error) {
     console.error("API Error:", error);
     return NextResponse.json(

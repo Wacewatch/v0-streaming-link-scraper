@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { scrapeAndStore } from "@/lib/scrapers";
+import { getTmdbSeriesTitle } from "@/lib/tmdb";
 
 export async function GET(
   request: Request,
@@ -19,8 +20,8 @@ export async function GET(
   const url = new URL(request.url);
   const season = url.searchParams.get("season");
   const episode = url.searchParams.get("episode");
-  const title = url.searchParams.get("title") || `${tmdbId}`;
-  const contentType = (url.searchParams.get("type") as "series" | "anime") || "series";
+  const contentType =
+    (url.searchParams.get("type") as "series" | "anime") || "series";
 
   try {
     const sql = getDb();
@@ -59,8 +60,10 @@ export async function GET(
           `;
         }
 
-        // Group players by season/episode
-        const seasonsMap: Record<number, Record<number, typeof playersQuery>> = {};
+        const seasonsMap: Record<
+          number,
+          Record<number, typeof playersQuery>
+        > = {};
         for (const p of playersQuery) {
           const s = p.season || 1;
           const e = p.episode || 1;
@@ -99,10 +102,9 @@ export async function GET(
       });
     }
 
-    // Scrape live
-    const results = await scrapeAndStore(
+    // Scrape live using TMDB title
+    const { title, results } = await scrapeAndStore(
       tmdbId,
-      title,
       contentType,
       season ? parseInt(season) : undefined,
       episode ? parseInt(episode) : undefined
@@ -133,7 +135,7 @@ export async function GET(
     return NextResponse.json({
       tmdb_id: tmdbId,
       content_type: contentType,
-      title: results[0]?.result.title || title,
+      title: title || (await getTmdbSeriesTitle(tmdbId)),
       sources,
       cached: false,
     });

@@ -5,13 +5,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
-function CodeBlock({
-  code,
-  label,
-}: {
-  code: string;
-  label: string;
-}) {
+function CodeBlock({ code, label }: { code: string; label: string }) {
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
@@ -51,15 +45,9 @@ export function ApiDocs() {
       method: "GET",
       path: "/api/stream/movie/{TMDB_ID}",
       description:
-        "Recupere tous les lecteurs disponibles pour un film par son ID TMDB.",
-      params: [
-        {
-          name: "title",
-          type: "query",
-          desc: "Titre du film (pour la recherche sur les sources)",
-        },
-      ],
-      example: `${baseUrl}/api/stream/movie/550?title=Fight+Club`,
+        "Recupere tous les lecteurs disponibles pour un film. Le titre est automatiquement recupere depuis TMDB.",
+      params: [],
+      example: `${baseUrl}/api/stream/movie/550`,
       response: `{
   "tmdb_id": 550,
   "content_type": "movie",
@@ -86,18 +74,21 @@ export function ApiDocs() {
       method: "GET",
       path: "/api/stream/series/{TMDB_ID}",
       description:
-        "Recupere les lecteurs pour une serie/anime. Supporte le filtrage par saison et episode.",
+        "Recupere les lecteurs pour une serie/anime. Le titre est automatiquement recupere depuis TMDB. Filtrage optionnel par saison et episode.",
       params: [
-        { name: "title", type: "query", desc: "Titre de la serie" },
-        { name: "season", type: "query", desc: "Numero de saison" },
-        { name: "episode", type: "query", desc: "Numero d'episode" },
+        { name: "season", type: "query", desc: "Numero de saison (optionnel)" },
+        {
+          name: "episode",
+          type: "query",
+          desc: "Numero d'episode (optionnel)",
+        },
         {
           name: "type",
           type: "query",
-          desc: 'Type: "series" ou "anime" (defaut: series)',
+          desc: '"series" ou "anime" (defaut: series)',
         },
       ],
-      example: `${baseUrl}/api/stream/series/1396?title=Breaking+Bad&season=1&episode=1`,
+      example: `${baseUrl}/api/stream/series/1396?season=1&episode=1`,
       response: `{
   "tmdb_id": 1396,
   "content_type": "series",
@@ -105,14 +96,22 @@ export function ApiDocs() {
   "sources": [
     {
       "source_name": "TopStream",
-      "source_url": "https://top-stream.space/serie/breaking-bad/saison-1/episode-1",
+      "source_url": "https://top-stream.space/serie/breaking-bad/...",
       "seasons": [
         {
           "season": 1,
           "episodes": [
             {
               "episode": 1,
-              "players": [...]
+              "players": [
+                {
+                  "name": "Doodstream",
+                  "embed_url": "https://...",
+                  "quality": "HD",
+                  "language": "VF",
+                  "type": "iframe"
+                }
+              ]
             }
           ]
         }
@@ -131,18 +130,32 @@ export function ApiDocs() {
           Documentation API
         </h2>
         <p className="text-sm text-muted-foreground">
-          Endpoints publics pour acceder aux liens de streaming
+          Endpoints publics -- seul le TMDB ID est necessaire, le titre est
+          automatiquement recupere
         </p>
       </div>
+
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="p-4">
+          <p className="text-sm text-foreground">
+            Aucun parametre{" "}
+            <code className="rounded bg-secondary px-1 py-0.5 font-mono text-xs text-primary">
+              title
+            </code>{" "}
+            necessaire ! Le titre est automatiquement recupere depuis l{"'"}API
+            TMDB a partir de l{"'"}ID.
+          </p>
+        </CardContent>
+      </Card>
 
       {endpoints.map((ep, i) => (
         <Card key={i} className="border-border bg-card">
           <CardHeader>
             <div className="flex items-center gap-3">
-              <Badge className="bg-chart-2/20 text-chart-2 border-chart-2/30">
+              <Badge className="border-chart-2/30 bg-chart-2/20 text-chart-2">
                 {ep.method}
               </Badge>
-              <CardTitle className="text-base text-card-foreground font-mono">
+              <CardTitle className="font-mono text-base text-card-foreground">
                 {ep.path}
               </CardTitle>
             </div>

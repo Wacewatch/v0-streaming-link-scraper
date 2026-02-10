@@ -7,7 +7,6 @@ export async function scrapeTopStreamMovie(
   title: string
 ): Promise<ScrapeResult | null> {
   try {
-    // TopStream uses slug-based URLs, search by TMDB ID or title
     const searchUrl = `${baseUrl}/recherche/${encodeURIComponent(title)}`;
 
     const searchRes = await fetch(searchUrl, {
@@ -25,7 +24,6 @@ export async function scrapeTopStreamMovie(
     const searchHtml = await searchRes.text();
     const $search = cheerio.load(searchHtml);
 
-    // Find the movie link from search results
     let movieUrl: string | null = null;
     $search("a[href*='/film/'], a[href*='/movie/']").each((_, el) => {
       const href = $search(el).attr("href");
@@ -34,9 +32,7 @@ export async function scrapeTopStreamMovie(
       }
     });
 
-    // Also try direct TMDB-based URL patterns
     if (!movieUrl) {
-      // Try common patterns
       const directUrls = [
         `${baseUrl}/film/${tmdbId}`,
         `${baseUrl}/movie/${tmdbId}`,
@@ -63,7 +59,6 @@ export async function scrapeTopStreamMovie(
 
     if (!movieUrl) return null;
 
-    // Fetch the movie page
     const movieRes = await fetch(movieUrl, {
       headers: {
         "User-Agent":
@@ -147,7 +142,6 @@ export async function scrapeTopStreamSeries(
 
     if (!seriesUrl) return null;
 
-    // If specific season/episode requested, try to build the URL
     let targetUrl = seriesUrl;
     if (season !== undefined) {
       targetUrl = `${seriesUrl}/saison-${season}`;
@@ -176,6 +170,87 @@ export async function scrapeTopStreamSeries(
   }
 }
 
+/** Scrape the listing page of a source to get all content links */
+export async function scrapeTopStreamListing(
+  baseUrl: string,
+  contentType: "movie" | "series" | "anime"
+): Promise<{ title: string; url: string }[]> {
+  const results: { title: string; url: string }[] = [];
+  const pathMap: Record<string, string[]> = {
+    movie: ["/films", "/film", "/movies"],
+    series: ["/series", "/serie"],
+    anime: ["/animes", "/anime"],
+  };
+
+  const paths = pathMap[contentType] || ["/films"];
+
+  for (const path of paths) {
+    try {
+      // Try paginated listing
+      for (let page = 1; page <= 10; page++) {
+        const listUrl =
+          page === 1 ? `${baseUrl}${path}` : `${baseUrl}${path}/page/${page}`;
+
+        const res = await fetch(listUrl, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            Accept: "text/html,application/xhtml+xml",
+            "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+          },
+          signal: AbortSignal.timeout(15000),
+        });
+
+        if (!res.ok) break;
+
+        const html = await res.text();
+        const $ = cheerio.load(html);
+
+        let foundItems = false;
+        // Look for content links
+        $("a").each((_, el) => {
+          const href = $(el).attr("href");
+          const text =
+            $(el).attr("title") ||
+            $(el).find("h2, h3, .title, .name").first().text().trim() ||
+            $(el).text().trim();
+
+          if (!href || !text) return;
+
+          const fullUrl = href.startsWith("http")
+            ? href
+            : `${baseUrl}${href}`;
+
+          // Only capture links that look like content detail pages
+          const isContentLink =
+            (contentType === "movie" &&
+              (href.includes("/film/") || href.includes("/movie/"))) ||
+            (contentType === "series" &&
+              (href.includes("/serie/") || href.includes("/series/"))) ||
+            (contentType === "anime" && href.includes("/anime/"));
+
+          if (isContentLink && text.length > 1 && text.length < 200) {
+            if (!results.find((r) => r.url === fullUrl)) {
+              results.push({ title: text, url: fullUrl });
+              foundItems = true;
+            }
+          }
+        });
+
+        // Stop paginating if no items found on this page
+        if (!foundItems) break;
+      }
+
+      // If we found results with this path, stop trying other paths
+      if (results.length > 0) break;
+    } catch {
+      continue;
+    }
+  }
+
+  return results;
+}
+
 function extractPlayers(
   html: string,
   sourceUrl: string,
@@ -186,7 +261,7 @@ function extractPlayers(
   const $ = cheerio.load(html);
   const players: ScrapeResult["players"] = [];
 
-  // Extract iframe sources (most common player embed method)
+  // Extract iframe sources
   $("iframe").each((_, el) => {
     const src = $(el).attr("src") || $(el).attr("data-src");
     if (src && src.startsWith("http")) {
@@ -203,7 +278,7 @@ function extractPlayers(
     }
   });
 
-  // Extract from player buttons/tabs (sites often have multiple player options)
+  // Extract from player buttons/tabs
   $(
     '[data-url], [data-src], [data-link], [data-embed], .player-btn, .player-tab, [onclick*="http"]'
   ).each((_, el) => {
@@ -229,12 +304,9 @@ function extractPlayers(
       }
     }
 
-    // Check onclick attributes
     const onclick = $(el).attr("onclick");
     if (onclick) {
-      const urlMatch = onclick.match(
-        /https?:\/\/[^\s'"\\)]+/
-      );
+      const urlMatch = onclick.match(/https?:\/\/[^\s'"\\)]+/);
       if (urlMatch && !players.find((p) => p.embed_url === urlMatch[0])) {
         players.push({
           player_name: $(el).text().trim() || extractPlayerName(urlMatch[0]),
@@ -249,7 +321,7 @@ function extractPlayers(
     }
   });
 
-  // Extract from script tags (some sites inject players via JS)
+  // Extract from script tags
   $("script").each((_, el) => {
     const scriptContent = $(el).html();
     if (scriptContent) {
@@ -279,8 +351,8 @@ function extractPlayers(
     }
   });
 
-  // Extract the actual page title
-  const pageTitle = $("h1").first().text().trim() || $("title").text().trim() || title;
+  const pageTitle =
+    $("h1").first().text().trim() || $("title").text().trim() || title;
 
   return {
     title: pageTitle,
@@ -293,9 +365,11 @@ function extractPlayerName(url: string): string {
   try {
     const hostname = new URL(url).hostname;
     const parts = hostname.split(".");
-    // Get the main domain name (e.g., "doodstream" from "doodstream.com")
     if (parts.length >= 2) {
-      return parts[parts.length - 2].charAt(0).toUpperCase() + parts[parts.length - 2].slice(1);
+      return (
+        parts[parts.length - 2].charAt(0).toUpperCase() +
+        parts[parts.length - 2].slice(1)
+      );
     }
     return hostname;
   } catch {
@@ -323,31 +397,11 @@ function extractLanguage(text: string): string {
 
 function isPlayerUrl(url: string): boolean {
   const playerDomains = [
-    "doodstream",
-    "dood",
-    "streamtape",
-    "mixdrop",
-    "upstream",
-    "vidoza",
-    "voe",
-    "filemoon",
-    "streamvid",
-    "vido",
-    "uqload",
-    "netu",
-    "waaw",
-    "wishonly",
-    "myvi",
-    "sibnet",
-    "sendvid",
-    "vidmoly",
-    "vidcloud",
-    "embedrise",
-    "guccihide",
-    "listeamed",
-    "ahvsh",
-    "playerx",
-    "darkibox",
+    "doodstream", "dood", "streamtape", "mixdrop", "upstream",
+    "vidoza", "voe", "filemoon", "streamvid", "vido", "uqload",
+    "netu", "waaw", "wishonly", "myvi", "sibnet", "sendvid",
+    "vidmoly", "vidcloud", "embedrise", "guccihide", "listeamed",
+    "ahvsh", "playerx", "darkibox",
   ];
   const lowUrl = url.toLowerCase();
   return playerDomains.some((domain) => lowUrl.includes(domain));
