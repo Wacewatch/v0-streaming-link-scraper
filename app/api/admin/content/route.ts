@@ -13,7 +13,7 @@ export async function GET() {
     SELECT 
       sc.*,
       s.name as source_name,
-      (SELECT COUNT(*) FROM players p WHERE p.content_id = sc.id AND p.is_active = true) as player_count
+      (SELECT COUNT(*) FROM stream_links sl WHERE sl.content_id = sc.id AND sl.is_active = true) as link_count
     FROM scraped_content sc
     JOIN sources s ON sc.source_id = s.id
     ORDER BY sc.updated_at DESC

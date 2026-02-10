@@ -26,7 +26,7 @@ export async function scrapeMovie(
         break;
     }
 
-    if (result && result.players.length > 0) {
+    if (result && result.links.length > 0) {
       results.push({ source, result });
     }
   }
@@ -61,7 +61,7 @@ export async function scrapeSeries(
         break;
     }
 
-    if (result && result.players.length > 0) {
+    if (result && result.links.length > 0) {
       results.push({ source, result });
     }
   }
@@ -84,6 +84,7 @@ export async function scrapeAndStore(
       : await scrapeSeries(tmdbId, season, episode);
 
   for (const { source, result } of results) {
+    // Upsert scraped_content
     const contentRows = await sql`
       INSERT INTO scraped_content (tmdb_id, content_type, title, source_id, source_url)
       VALUES (${tmdbId}, ${contentType}, ${title}, ${source.id}, ${result.source_url})
@@ -94,20 +95,27 @@ export async function scrapeAndStore(
 
     const contentId = contentRows[0].id;
 
-    for (const player of result.players) {
+    // Insert each m3u8 stream link
+    for (const link of result.links) {
       await sql`
-        INSERT INTO players (content_id, player_name, embed_url, quality, language, season, episode, player_type)
+        INSERT INTO stream_links (content_id, m3u8_url, quality, language, season, episode, host, headers)
         VALUES (
           ${contentId},
-          ${player.player_name},
-          ${player.embed_url},
-          ${player.quality || "HD"},
-          ${player.language || "VF"},
-          ${player.season || null},
-          ${player.episode || null},
-          ${player.player_type || "iframe"}
+          ${link.m3u8_url},
+          ${link.quality || "auto"},
+          ${link.language || "VF"},
+          ${link.season || null},
+          ${link.episode || null},
+          ${link.host || "unknown"},
+          ${JSON.stringify(link.headers || {})}
         )
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (content_id, m3u8_url, season, episode) DO UPDATE SET
+          quality = EXCLUDED.quality,
+          language = EXCLUDED.language,
+          host = EXCLUDED.host,
+          headers = EXCLUDED.headers,
+          is_active = true,
+          last_checked = NOW()
       `;
     }
   }
@@ -139,7 +147,6 @@ export async function bulkScrapeSource(
 
   for (const listing of listings) {
     try {
-      // For each found content, try to scrape its page for players
       const res = await fetch(listing.url, {
         headers: {
           "User-Agent":
@@ -156,44 +163,14 @@ export async function bulkScrapeSource(
       }
 
       const html = await res.text();
-      const cheerio = await import("cheerio");
-      const $ = cheerio.load(html);
 
-      // Extract players from the page
-      const players: ScrapeResult["players"] = [];
+      // Look for m3u8 URLs directly in the page
+      const m3u8Regex = /https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*/gi;
+      const m3u8Matches = html.match(m3u8Regex) || [];
+      const uniqueM3u8 = [...new Set(m3u8Matches)];
 
-      $("iframe").each((_, el) => {
-        const src = $(el).attr("src") || $(el).attr("data-src");
-        if (src && src.startsWith("http")) {
-          players.push({
-            player_name: extractPlayerNameFromUrl(src),
-            embed_url: src,
-            quality: "HD",
-            language: "VF",
-            player_type: "iframe",
-          });
-        }
-      });
-
-      $('[data-url], [data-src], [data-link], [data-embed]').each((_, el) => {
-        const url =
-          $(el).attr("data-url") ||
-          $(el).attr("data-src") ||
-          $(el).attr("data-link") ||
-          $(el).attr("data-embed");
-        if (url && url.startsWith("http") && !players.find((p) => p.embed_url === url)) {
-          players.push({
-            player_name: $(el).text().trim() || extractPlayerNameFromUrl(url),
-            embed_url: url,
-            quality: "HD",
-            language: "VF",
-            player_type: "iframe",
-          });
-        }
-      });
-
-      if (players.length > 0) {
-        // Store without TMDB ID (we store 0 for bulk scrapes, users can link later)
+      if (uniqueM3u8.length > 0) {
+        // Store without TMDB ID (0 = unmatched, users can link later)
         const contentRows = await sql`
           INSERT INTO scraped_content (tmdb_id, content_type, title, source_id, source_url)
           VALUES (0, ${contentType}, ${listing.title}, ${source.id}, ${listing.url})
@@ -203,16 +180,22 @@ export async function bulkScrapeSource(
         `;
         const contentId = contentRows[0].id;
 
-        for (const player of players) {
-          await sql`
-            INSERT INTO players (content_id, player_name, embed_url, quality, language, season, episode, player_type)
-            VALUES (${contentId}, ${player.player_name}, ${player.embed_url}, ${player.quality || "HD"}, ${player.language || "VF"}, ${player.season || null}, ${player.episode || null}, ${player.player_type || "iframe"})
-            ON CONFLICT DO NOTHING
-          `;
+        for (const m3u8Url of uniqueM3u8) {
+          const cleanUrl = m3u8Url.replace(/['"\\);}\]>]+$/, "");
+          try {
+            new URL(cleanUrl);
+            await sql`
+              INSERT INTO stream_links (content_id, m3u8_url, quality, language, host)
+              VALUES (${contentId}, ${cleanUrl}, 'auto', 'VF', ${new URL(cleanUrl).hostname})
+              ON CONFLICT (content_id, m3u8_url, season, episode) DO NOTHING
+            `;
+          } catch {
+            continue;
+          }
         }
 
         stats.success++;
-        stats.items.push(`${listing.title} (${players.length} lecteurs)`);
+        stats.items.push(`${listing.title} (${uniqueM3u8.length} lien(s) m3u8)`);
       } else {
         stats.failed++;
       }
@@ -228,12 +211,12 @@ export async function bulkScrapeSource(
 export async function bulkScrapeSeriesEpisodes(
   tmdbId: number,
   contentType: "series" | "anime"
-): Promise<{ title: string; seasons_scraped: number; episodes_scraped: number; players_found: number }> {
+): Promise<{ title: string; seasons_scraped: number; episodes_scraped: number; links_found: number }> {
   const details = await getTmdbSeriesDetails(tmdbId);
   const title = details.name || details.original_name;
 
   let totalEpisodes = 0;
-  let totalPlayers = 0;
+  let totalLinks = 0;
   let seasonsScraped = 0;
 
   for (const season of details.seasons) {
@@ -250,8 +233,8 @@ export async function bulkScrapeSeriesEpisodes(
           season.season_number,
           ep.episode_number
         );
-        const playersCount = results.reduce((s, r) => s + r.result.players.length, 0);
-        totalPlayers += playersCount;
+        const linksCount = results.reduce((s, r) => s + r.result.links.length, 0);
+        totalLinks += linksCount;
         totalEpisodes++;
       } catch {
         // Continue with next episode
@@ -265,19 +248,6 @@ export async function bulkScrapeSeriesEpisodes(
     title,
     seasons_scraped: seasonsScraped,
     episodes_scraped: totalEpisodes,
-    players_found: totalPlayers,
+    links_found: totalLinks,
   };
-}
-
-function extractPlayerNameFromUrl(url: string): string {
-  try {
-    const hostname = new URL(url).hostname;
-    const parts = hostname.split(".");
-    if (parts.length >= 2) {
-      return parts[parts.length - 2].charAt(0).toUpperCase() + parts[parts.length - 2].slice(1);
-    }
-    return hostname;
-  } catch {
-    return "Unknown";
-  }
 }

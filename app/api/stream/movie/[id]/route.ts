@@ -31,20 +31,20 @@ export async function GET(
     if (existing.length > 0) {
       const sources = [];
       for (const content of existing) {
-        const players = await sql`
-          SELECT * FROM players 
+        const streams = await sql`
+          SELECT * FROM stream_links 
           WHERE content_id = ${content.id} AND is_active = true
-          ORDER BY player_name
+          ORDER BY quality, host
         `;
         sources.push({
           source_name: content.source_name,
           source_url: content.source_url,
-          players: players.map((p) => ({
-            name: p.player_name,
-            embed_url: p.embed_url,
-            quality: p.quality,
-            language: p.language,
-            type: p.player_type,
+          streams: streams.map((s) => ({
+            m3u8_url: s.m3u8_url,
+            quality: s.quality,
+            language: s.language,
+            host: s.host,
+            headers: s.headers,
           })),
         });
       }
@@ -64,12 +64,12 @@ export async function GET(
     const sources = results.map(({ source, result }) => ({
       source_name: source.name,
       source_url: result.source_url,
-      players: result.players.map((p) => ({
-        name: p.player_name,
-        embed_url: p.embed_url,
-        quality: p.quality || "HD",
-        language: p.language || "VF",
-        type: p.player_type || "iframe",
+      streams: result.links.map((l) => ({
+        m3u8_url: l.m3u8_url,
+        quality: l.quality || "auto",
+        language: l.language || "VF",
+        host: l.host || "unknown",
+        headers: l.headers || {},
       })),
     }));
 

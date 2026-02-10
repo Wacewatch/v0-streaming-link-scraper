@@ -68,7 +68,7 @@ export function Dashboard() {
         <StatCard title="Contenus" value={data?.content ?? 0} icon={Database} />
         <StatCard title="Films" value={data?.movies ?? 0} icon={Film} />
         <StatCard title="Series" value={data?.series ?? 0} icon={Tv} />
-        <StatCard title="Lecteurs" value={data?.players ?? 0} icon={PlayCircle} />
+        <StatCard title="Liens m3u8" value={data?.stream_links ?? 0} icon={PlayCircle} />
       </div>
 
       <Card className="border-border bg-card">
