@@ -1,78 +1,42 @@
 import * as cheerio from "cheerio";
+import puppeteer from "puppeteer";
 import type { ScrapeResult } from "@/lib/types";
+
+// Slugify title for URL construction
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Remove accents
+    .replace(/[^a-z0-9]+/g, "-") // Replace non-alphanumeric with dashes
+    .replace(/^-+|-+$/g, ""); // Remove leading/trailing dashes
+}
 
 export async function scrapeTopStreamMovie(
   baseUrl: string,
   tmdbId: number,
   title: string
 ): Promise<ScrapeResult | null> {
+  console.log(`[v0] Starting scrape for movie TMDB ${tmdbId}: ${title}`);
+  
   try {
-    const searchUrl = `${baseUrl}/recherche/${encodeURIComponent(title)}`;
-
-    const searchRes = await fetch(searchUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!searchRes.ok) return null;
-
-    const searchHtml = await searchRes.text();
-    const $search = cheerio.load(searchHtml);
-
-    let movieUrl: string | null = null;
-    $search("a[href*='/film/'], a[href*='/movie/']").each((_, el) => {
-      const href = $search(el).attr("href");
-      if (href && !movieUrl) {
-        movieUrl = href.startsWith("http") ? href : `${baseUrl}${href}`;
-      }
-    });
-
-    if (!movieUrl) {
-      const directUrls = [
-        `${baseUrl}/film/${tmdbId}`,
-        `${baseUrl}/movie/${tmdbId}`,
-      ];
-      for (const url of directUrls) {
-        try {
-          const res = await fetch(url, {
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
-            redirect: "follow",
-            signal: AbortSignal.timeout(10000),
-          });
-          if (res.ok) {
-            movieUrl = url;
-            break;
-          }
-        } catch {
-          continue;
-        }
-      }
+    // Try to construct the URL directly from title
+    const slug = slugify(title);
+    const movieUrl = `${baseUrl}/movie/${slug}`;
+    
+    console.log(`[v0] Attempting movie URL: ${movieUrl}`);
+    
+    // Use Puppeteer to handle the unlock flow
+    const result = await scrapeWithBrowser(movieUrl, title);
+    
+    if (result && result.players.length > 0) {
+      console.log(`[v0] Found ${result.players.length} players for movie ${title}`);
+      return result;
     }
-
-    if (!movieUrl) return null;
-
-    const movieRes = await fetch(movieUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!movieRes.ok) return null;
-
-    const movieHtml = await movieRes.text();
-    return extractPlayers(movieHtml, movieUrl, title);
+    
+    // Fallback to search
+    console.log(`[v0] Direct URL failed, trying search...`);
+    return await searchAndScrape(baseUrl, title, "movie");
   } catch (error) {
     console.error(`[TopStream] Error scraping movie ${tmdbId}:`, error);
     return null;
@@ -86,9 +50,49 @@ export async function scrapeTopStreamSeries(
   season?: number,
   episode?: number
 ): Promise<ScrapeResult | null> {
+  console.log(`[v0] Starting scrape for series TMDB ${tmdbId}: ${title} S${season}E${episode}`);
+  
+  try {
+    // Try to construct the URL directly
+    const slug = slugify(title);
+    let targetUrl = `${baseUrl}/serie/${slug}`;
+    
+    if (season !== undefined) {
+      targetUrl = `${baseUrl}/serie/${slug}/saison-${season}`;
+      if (episode !== undefined) {
+        targetUrl = `${baseUrl}/serie/${slug}/saison-${season}/episode-${episode}`;
+      }
+    }
+    
+    console.log(`[v0] Attempting series URL: ${targetUrl}`);
+    
+    const result = await scrapeWithBrowser(targetUrl, title, season, episode);
+    
+    if (result && result.players.length > 0) {
+      console.log(`[v0] Found ${result.players.length} players for series ${title}`);
+      return result;
+    }
+    
+    // Fallback to search
+    console.log(`[v0] Direct URL failed, trying search...`);
+    return await searchAndScrape(baseUrl, title, "series", season, episode);
+  } catch (error) {
+    console.error(`[TopStream] Error scraping series ${tmdbId}:`, error);
+    return null;
+  }
+}
+
+// Search and scrape helper
+async function searchAndScrape(
+  baseUrl: string,
+  title: string,
+  type: "movie" | "series" | "anime",
+  season?: number,
+  episode?: number
+): Promise<ScrapeResult | null> {
   try {
     const searchUrl = `${baseUrl}/recherche/${encodeURIComponent(title)}`;
-
+    
     const searchRes = await fetch(searchUrl, {
       headers: {
         "User-Agent":
@@ -104,70 +108,285 @@ export async function scrapeTopStreamSeries(
     const searchHtml = await searchRes.text();
     const $search = cheerio.load(searchHtml);
 
-    let seriesUrl: string | null = null;
-    $search(
-      "a[href*='/serie/'], a[href*='/series/'], a[href*='/anime/']"
-    ).each((_, el) => {
+    let contentUrl: string | null = null;
+    const selector = type === "movie" 
+      ? "a[href*='/movie/'], a[href*='/film/']"
+      : "a[href*='/serie/'], a[href*='/series/'], a[href*='/anime/']";
+    
+    $search(selector).each((_, el) => {
       const href = $search(el).attr("href");
-      if (href && !seriesUrl) {
-        seriesUrl = href.startsWith("http") ? href : `${baseUrl}${href}`;
+      if (href && !contentUrl) {
+        contentUrl = href.startsWith("http") ? href : `${baseUrl}${href}`;
       }
     });
 
-    if (!seriesUrl) {
-      const directUrls = [
-        `${baseUrl}/serie/${tmdbId}`,
-        `${baseUrl}/series/${tmdbId}`,
-        `${baseUrl}/anime/${tmdbId}`,
-      ];
-      for (const url of directUrls) {
-        try {
-          const res = await fetch(url, {
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
-            redirect: "follow",
-            signal: AbortSignal.timeout(10000),
-          });
-          if (res.ok) {
-            seriesUrl = url;
-            break;
+    if (!contentUrl) return null;
+
+    // Append season/episode to URL if needed
+    if (season !== undefined && type !== "movie") {
+      contentUrl = `${contentUrl}/saison-${season}`;
+      if (episode !== undefined) {
+        contentUrl = `${contentUrl}/episode-${episode}`;
+      }
+    }
+
+    return await scrapeWithBrowser(contentUrl, title, season, episode);
+  } catch (error) {
+    console.error("[TopStream] Search failed:", error);
+    return null;
+  }
+}
+
+// Main browser automation function
+async function scrapeWithBrowser(
+  url: string,
+  title: string,
+  season?: number,
+  episode?: number
+): Promise<ScrapeResult | null> {
+  let browser;
+  
+  try {
+    console.log(`[v0] Launching browser for URL: ${url}`);
+    
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+    });
+
+    const page = await browser.newPage();
+    
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    );
+    
+    await page.setViewport({ width: 1920, height: 1080 });
+
+    console.log(`[v0] Navigating to ${url}`);
+    await page.goto(url, { 
+      waitUntil: "networkidle2", 
+      timeout: 30000 
+    });
+
+    // Wait a bit for the page to load
+    await page.waitForTimeout(2000);
+
+    // Look for the "Continuer" button and click it multiple times to unlock
+    let clickCount = 0;
+    const maxClicks = 5;
+    
+    console.log(`[v0] Looking for unlock buttons...`);
+    
+    while (clickCount < maxClicks) {
+      try {
+        // Look for various button selectors that might be the unlock button
+        const buttonSelectors = [
+          'button:has-text("Continuer")',
+          'button:has-text("Continue")',
+          'a:has-text("Continuer")',
+          'a:has-text("Continue")',
+          '.unlock-button',
+          '[class*="continue"]',
+          '[class*="unlock"]',
+        ];
+
+        let buttonFound = false;
+        
+        for (const selector of buttonSelectors) {
+          try {
+            const button = await page.$(selector);
+            if (button) {
+              console.log(`[v0] Clicking unlock button (click ${clickCount + 1})`);
+              await button.click();
+              buttonFound = true;
+              clickCount++;
+              await page.waitForTimeout(1500); // Wait between clicks
+              break;
+            }
+          } catch {
+            continue;
           }
-        } catch {
-          continue;
+        }
+
+        if (!buttonFound) break;
+      } catch (e) {
+        console.log(`[v0] No more unlock buttons found`);
+        break;
+      }
+    }
+
+    // Wait for the embed to appear
+    await page.waitForTimeout(3000);
+
+    // Extract embed URLs
+    const players: ScrapeResult["players"] = [];
+
+    // Method 1: Look for iframe with /embed/ URLs
+    console.log(`[v0] Extracting iframes...`);
+    const iframes = await page.$$eval("iframe", (frames) =>
+      frames
+        .map((f) => f.src || f.getAttribute("data-src"))
+        .filter((src) => src && src.includes("/embed/"))
+    );
+
+    for (const src of iframes) {
+      if (src && !players.find((p) => p.embed_url === src)) {
+        console.log(`[v0] Found embed iframe: ${src}`);
+        
+        // If it's a /embed/ URL, scrape it to get the actual player
+        if (src.includes("/embed/")) {
+          const embeddedPlayers = await scrapeEmbedPage(src);
+          players.push(...embeddedPlayers.map(p => ({
+            ...p,
+            season,
+            episode
+          })));
+        } else {
+          players.push({
+            player_name: extractPlayerName(src),
+            embed_url: src,
+            quality: "HD",
+            language: "VF",
+            season,
+            episode,
+            player_type: "iframe",
+          });
         }
       }
     }
 
-    if (!seriesUrl) return null;
+    // Method 2: Check for data attributes
+    const dataUrls = await page.$$eval(
+      "[data-url], [data-src], [data-link], [data-embed]",
+      (elements) =>
+        elements
+          .map(
+            (el) =>
+              el.getAttribute("data-url") ||
+              el.getAttribute("data-src") ||
+              el.getAttribute("data-link") ||
+              el.getAttribute("data-embed")
+          )
+          .filter((url) => url && url.startsWith("http"))
+    );
 
-    let targetUrl = seriesUrl;
-    if (season !== undefined) {
-      targetUrl = `${seriesUrl}/saison-${season}`;
-      if (episode !== undefined) {
-        targetUrl = `${seriesUrl}/saison-${season}/episode-${episode}`;
+    for (const url of dataUrls) {
+      if (url && !players.find((p) => p.embed_url === url)) {
+        console.log(`[v0] Found data-url: ${url}`);
+        players.push({
+          player_name: extractPlayerName(url),
+          embed_url: url,
+          quality: "HD",
+          language: "VF",
+          season,
+          episode,
+          player_type: "iframe",
+        });
       }
     }
 
-    const pageRes = await fetch(targetUrl, {
+    // Method 3: Parse page HTML for more players
+    const html = await page.content();
+    const additionalPlayers = extractPlayers(html, url, title, season, episode);
+    
+    for (const player of additionalPlayers.players) {
+      if (!players.find(p => p.embed_url === player.embed_url)) {
+        players.push(player);
+      }
+    }
+
+    console.log(`[v0] Total players found: ${players.length}`);
+
+    return {
+      title: additionalPlayers.title || title,
+      source_url: url,
+      players,
+    };
+  } catch (error) {
+    console.error("[TopStream] Browser scraping failed:", error);
+    return null;
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+}
+
+// Scrape the /embed/ page to get actual player URLs
+async function scrapeEmbedPage(embedUrl: string): Promise<Array<{player_name: string, embed_url: string, quality: string, language: string, player_type: string}>> {
+  const players: Array<{player_name: string, embed_url: string, quality: string, language: string, player_type: string}> = [];
+  
+  try {
+    console.log(`[v0] Scraping embed page: ${embedUrl}`);
+    
+    const res = await fetch(embedUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+        Referer: embedUrl.split("/embed/")[0],
       },
       signal: AbortSignal.timeout(15000),
     });
 
-    if (!pageRes.ok) return null;
+    if (!res.ok) return players;
 
-    const pageHtml = await pageRes.text();
-    return extractPlayers(pageHtml, targetUrl, title, season, episode);
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    // Extract iframes
+    $("iframe").each((_, el) => {
+      const src = $(el).attr("src") || $(el).attr("data-src");
+      if (src && src.startsWith("http") && isPlayerUrl(src)) {
+        console.log(`[v0] Found player in embed: ${src}`);
+        players.push({
+          player_name: extractPlayerName(src),
+          embed_url: src,
+          quality: "HD",
+          language: "VF",
+          player_type: "iframe",
+        });
+      }
+    });
+
+    // Extract from script tags
+    $("script").each((_, el) => {
+      const scriptContent = $(el).html();
+      if (scriptContent) {
+        const embedMatches = scriptContent.match(
+          /(?:src|url|file|source)\s*[:=]\s*['"](https?:\/\/[^'"]+)['"]/gi
+        );
+        if (embedMatches) {
+          for (const match of embedMatches) {
+            const urlMatch = match.match(/https?:\/\/[^'"]+/);
+            if (
+              urlMatch &&
+              isPlayerUrl(urlMatch[0]) &&
+              !players.find((p) => p.embed_url === urlMatch[0])
+            ) {
+              console.log(`[v0] Found player in script: ${urlMatch[0]}`);
+              players.push({
+                player_name: extractPlayerName(urlMatch[0]),
+                embed_url: urlMatch[0],
+                quality: "HD",
+                language: "VF",
+                player_type: "iframe",
+              });
+            }
+          }
+        }
+      }
+    });
   } catch (error) {
-    console.error(`[TopStream] Error scraping series ${tmdbId}:`, error);
-    return null;
+    console.error("[TopStream] Embed scrape failed:", error);
   }
+
+  return players;
 }
 
 /** Scrape the listing page of a source to get all content links */

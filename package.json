@@ -62,7 +62,9 @@
     "cheerio": "^1.0.0",
     "bcryptjs": "^2.4.3",
     "jose": "^5.9.6",
-    "swr": "^2.3.0"
+    "swr": "^2.3.0",
+    "puppeteer": "^23.11.1",
+    "puppeteer-core": "^23.11.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.13",
