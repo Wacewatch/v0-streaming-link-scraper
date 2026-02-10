@@ -1,6 +1,38 @@
 import * as cheerio from "cheerio";
 import type { ScrapeResult } from "@/lib/types";
 
+const FETCH_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+  Referer: "https://www.google.com/",
+};
+
+// ── Known embed/player domains ──────────────────────────────────────────────
+const PLAYER_DOMAINS = [
+  "doodstream", "dood", "streamtape", "mixdrop", "upstream",
+  "vidoza", "voe", "filemoon", "streamvid", "vido", "uqload",
+  "netu", "waaw", "wishonly", "myvi", "sibnet", "sendvid",
+  "vidmoly", "vidcloud", "embedrise", "guccihide", "listeamed",
+  "ahvsh", "playerx", "darkibox", "streamsb", "fembed", "supervideo",
+  "evoload", "mp4upload", "vidlox", "streamhub", "streamz",
+  "uptostream", "uptobox", "rapidrame", "cloudemb", "embedsito",
+  "vidsrc", "2embed", "autoembed", "multiembed", "membed",
+  "playtaku", "embtaku", "anime1", "gogoanime",
+];
+
+// ── Domains / patterns to REJECT (images, APIs, trackers, CDNs) ────────────
+const REJECT_PATTERNS = [
+  "image.tmdb.org", "tmdb.org/t/p/", "themoviedb.org",
+  "gravatar.com", "googleapis.com/", "gstatic.com",
+  "facebook.com", "twitter.com", "instagram.com", "tiktok.com",
+  "google-analytics.com", "googletagmanager.com", "doubleclick.net",
+  "amazon-adsystem.com", "adsafeprotected.com",
+  ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp",
+  ".css", ".woff", ".woff2", ".ttf", ".eot",
+];
+
 export async function scrapeTopStreamMovie(
   baseUrl: string,
   tmdbId: number,
@@ -8,17 +40,10 @@ export async function scrapeTopStreamMovie(
 ): Promise<ScrapeResult | null> {
   try {
     const searchUrl = `${baseUrl}/recherche/${encodeURIComponent(title)}`;
-
     const searchRes = await fetch(searchUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
+      headers: FETCH_HEADERS,
       signal: AbortSignal.timeout(15000),
     });
-
     if (!searchRes.ok) return null;
 
     const searchHtml = await searchRes.text();
@@ -40,35 +65,21 @@ export async function scrapeTopStreamMovie(
       for (const url of directUrls) {
         try {
           const res = await fetch(url, {
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
+            headers: FETCH_HEADERS,
             redirect: "follow",
             signal: AbortSignal.timeout(10000),
           });
-          if (res.ok) {
-            movieUrl = url;
-            break;
-          }
-        } catch {
-          continue;
-        }
+          if (res.ok) { movieUrl = url; break; }
+        } catch { continue; }
       }
     }
 
     if (!movieUrl) return null;
 
     const movieRes = await fetch(movieUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
+      headers: FETCH_HEADERS,
       signal: AbortSignal.timeout(15000),
     });
-
     if (!movieRes.ok) return null;
 
     const movieHtml = await movieRes.text();
@@ -88,26 +99,17 @@ export async function scrapeTopStreamSeries(
 ): Promise<ScrapeResult | null> {
   try {
     const searchUrl = `${baseUrl}/recherche/${encodeURIComponent(title)}`;
-
     const searchRes = await fetch(searchUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
+      headers: FETCH_HEADERS,
       signal: AbortSignal.timeout(15000),
     });
-
     if (!searchRes.ok) return null;
 
     const searchHtml = await searchRes.text();
     const $search = cheerio.load(searchHtml);
 
     let seriesUrl: string | null = null;
-    $search(
-      "a[href*='/serie/'], a[href*='/series/'], a[href*='/anime/']"
-    ).each((_, el) => {
+    $search("a[href*='/serie/'], a[href*='/series/'], a[href*='/anime/']").each((_, el) => {
       const href = $search(el).attr("href");
       if (href && !seriesUrl) {
         seriesUrl = href.startsWith("http") ? href : `${baseUrl}${href}`;
@@ -123,20 +125,12 @@ export async function scrapeTopStreamSeries(
       for (const url of directUrls) {
         try {
           const res = await fetch(url, {
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            },
+            headers: FETCH_HEADERS,
             redirect: "follow",
             signal: AbortSignal.timeout(10000),
           });
-          if (res.ok) {
-            seriesUrl = url;
-            break;
-          }
-        } catch {
-          continue;
-        }
+          if (res.ok) { seriesUrl = url; break; }
+        } catch { continue; }
       }
     }
 
@@ -151,15 +145,9 @@ export async function scrapeTopStreamSeries(
     }
 
     const pageRes = await fetch(targetUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-      },
+      headers: FETCH_HEADERS,
       signal: AbortSignal.timeout(15000),
     });
-
     if (!pageRes.ok) return null;
 
     const pageHtml = await pageRes.text();
@@ -186,28 +174,20 @@ export async function scrapeTopStreamListing(
 
   for (const path of paths) {
     try {
-      // Try paginated listing
       for (let page = 1; page <= 10; page++) {
         const listUrl =
           page === 1 ? `${baseUrl}${path}` : `${baseUrl}${path}/page/${page}`;
 
         const res = await fetch(listUrl, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            Accept: "text/html,application/xhtml+xml",
-            "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-          },
+          headers: FETCH_HEADERS,
           signal: AbortSignal.timeout(15000),
         });
-
         if (!res.ok) break;
 
         const html = await res.text();
         const $ = cheerio.load(html);
 
         let foundItems = false;
-        // Look for content links
         $("a").each((_, el) => {
           const href = $(el).attr("href");
           const text =
@@ -217,11 +197,7 @@ export async function scrapeTopStreamListing(
 
           if (!href || !text) return;
 
-          const fullUrl = href.startsWith("http")
-            ? href
-            : `${baseUrl}${href}`;
-
-          // Only capture links that look like content detail pages
+          const fullUrl = href.startsWith("http") ? href : `${baseUrl}${href}`;
           const isContentLink =
             (contentType === "movie" &&
               (href.includes("/film/") || href.includes("/movie/"))) ||
@@ -237,21 +213,17 @@ export async function scrapeTopStreamListing(
           }
         });
 
-        // Stop paginating if no items found on this page
         if (!foundItems) break;
       }
-
-      // If we found results with this path, stop trying other paths
       if (results.length > 0) break;
-    } catch {
-      continue;
-    }
+    } catch { continue; }
   }
 
   return results;
 }
 
-function extractPlayers(
+// ── Core extraction – public so index.ts can reuse it ─────────────────────
+export function extractPlayers(
   html: string,
   sourceUrl: string,
   title: string,
@@ -260,25 +232,43 @@ function extractPlayers(
 ): ScrapeResult {
   const $ = cheerio.load(html);
   const players: ScrapeResult["players"] = [];
+  const seen = new Set<string>();
 
-  // Extract iframe sources
+  function addPlayer(url: string, name: string, contextText?: string) {
+    const clean = url.trim();
+    if (!clean || seen.has(clean)) return;
+    if (!isVideoUrl(clean)) return;
+
+    seen.add(clean);
+    players.push({
+      player_name: name || extractPlayerName(clean),
+      embed_url: clean,
+      quality: extractQuality(contextText || name || ""),
+      language: extractLanguage(contextText || name || ""),
+      season,
+      episode,
+      player_type: isM3u8Url(clean) ? "m3u8" : "embed",
+    });
+  }
+
+  // ── 1. Direct m3u8 links anywhere in the raw HTML ─────────────────────
+  const m3u8Regex = /https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*/gi;
+  const m3u8Matches = html.match(m3u8Regex);
+  if (m3u8Matches) {
+    for (const m of m3u8Matches) {
+      addPlayer(m, "m3u8");
+    }
+  }
+
+  // ── 2. iframe src/data-src – only if they point to player/embed sites ─
   $("iframe").each((_, el) => {
     const src = $(el).attr("src") || $(el).attr("data-src");
     if (src && src.startsWith("http")) {
-      const playerName = extractPlayerName(src);
-      players.push({
-        player_name: playerName,
-        embed_url: src,
-        quality: "HD",
-        language: "VF",
-        season,
-        episode,
-        player_type: "iframe",
-      });
+      addPlayer(src, extractPlayerName(src));
     }
   });
 
-  // Extract from player buttons/tabs
+  // ── 3. Player buttons / tabs with data-url, data-embed, etc. ─────────
   $(
     '[data-url], [data-src], [data-link], [data-embed], .player-btn, .player-tab, [onclick*="http"]'
   ).each((_, el) => {
@@ -288,66 +278,61 @@ function extractPlayers(
       $(el).attr("data-link") ||
       $(el).attr("data-embed");
 
+    const contextText = $(el).text().trim();
+
     if (url && url.startsWith("http")) {
-      const name =
-        $(el).text().trim() || $(el).attr("title") || extractPlayerName(url);
-      if (!players.find((p) => p.embed_url === url)) {
-        players.push({
-          player_name: name,
-          embed_url: url,
-          quality: extractQuality($(el).text()),
-          language: extractLanguage($(el).text()),
-          season,
-          episode,
-          player_type: "iframe",
-        });
-      }
+      addPlayer(url, contextText || extractPlayerName(url), contextText);
     }
 
     const onclick = $(el).attr("onclick");
     if (onclick) {
       const urlMatch = onclick.match(/https?:\/\/[^\s'"\\)]+/);
-      if (urlMatch && !players.find((p) => p.embed_url === urlMatch[0])) {
-        players.push({
-          player_name: $(el).text().trim() || extractPlayerName(urlMatch[0]),
-          embed_url: urlMatch[0],
-          quality: "HD",
-          language: "VF",
-          season,
-          episode,
-          player_type: "iframe",
-        });
+      if (urlMatch) {
+        addPlayer(urlMatch[0], contextText || extractPlayerName(urlMatch[0]), contextText);
       }
     }
   });
 
-  // Extract from script tags
+  // ── 4. Script tags – look for m3u8, embed URLs, player configs ────────
   $("script").each((_, el) => {
     const scriptContent = $(el).html();
-    if (scriptContent) {
-      const embedMatches = scriptContent.match(
-        /(?:src|url|link|embed)\s*[:=]\s*['"](https?:\/\/[^'"]+)['"]/gi
-      );
-      if (embedMatches) {
-        for (const match of embedMatches) {
-          const urlMatch = match.match(/https?:\/\/[^'"]+/);
-          if (
-            urlMatch &&
-            isPlayerUrl(urlMatch[0]) &&
-            !players.find((p) => p.embed_url === urlMatch[0])
-          ) {
-            players.push({
-              player_name: extractPlayerName(urlMatch[0]),
-              embed_url: urlMatch[0],
-              quality: "HD",
-              language: "VF",
-              season,
-              episode,
-              player_type: "iframe",
-            });
-          }
-        }
+    if (!scriptContent) return;
+
+    // m3u8 links in scripts
+    const scriptM3u8 = scriptContent.match(m3u8Regex);
+    if (scriptM3u8) {
+      for (const m of scriptM3u8) {
+        addPlayer(m, "m3u8");
       }
+    }
+
+    // file/source/src URLs in JS (common patterns in video players)
+    const fileRegex = /(?:file|source|src|url|video_url|video|stream|link|embed)\s*[:=]\s*['"](https?:\/\/[^'"]+)['"]/gi;
+    let match: RegExpExecArray | null;
+    while ((match = fileRegex.exec(scriptContent)) !== null) {
+      addPlayer(match[1], extractPlayerName(match[1]));
+    }
+
+    // JSON-encoded player configs {"url":"..."}
+    const jsonUrlRegex = /"(?:url|file|src|source|embed|link|stream)"\s*:\s*"(https?:\/\/[^"]+)"/gi;
+    while ((match = jsonUrlRegex.exec(scriptContent)) !== null) {
+      addPlayer(match[1], extractPlayerName(match[1]));
+    }
+  });
+
+  // ── 5. <video> / <source> tags ────────────────────────────────────────
+  $("video source, video").each((_, el) => {
+    const src = $(el).attr("src");
+    if (src && src.startsWith("http")) {
+      addPlayer(src, "video");
+    }
+  });
+
+  // ── 6. <a> links pointing to known embed/player domains ──────────────
+  $("a[href]").each((_, el) => {
+    const href = $(el).attr("href");
+    if (href && href.startsWith("http") && isPlayerUrl(href)) {
+      addPlayer(href, $(el).text().trim() || extractPlayerName(href), $(el).text().trim());
     }
   });
 
@@ -359,6 +344,74 @@ function extractPlayers(
     source_url: sourceUrl,
     players,
   };
+}
+
+/**
+ * Follow an embed URL to try to resolve the actual m3u8 link inside it.
+ * Useful for known player domains that host an intermediate HTML page.
+ */
+export async function resolveEmbedToM3u8(embedUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(embedUrl, {
+      headers: {
+        ...FETCH_HEADERS,
+        Referer: embedUrl,
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    // Direct m3u8 match
+    const m3u8Match = html.match(/https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*/i);
+    if (m3u8Match) return m3u8Match[0];
+
+    // file:"..." or source:"..." patterns
+    const fileMatch = html.match(/(?:file|source|src|video_url)\s*[:=]\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/i);
+    if (fileMatch) return fileMatch[1];
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function isM3u8Url(url: string): boolean {
+  return /\.m3u8/i.test(url);
+}
+
+/** Returns true if the URL looks like a video/embed URL (not an image/tracker/etc.) */
+function isVideoUrl(url: string): boolean {
+  const low = url.toLowerCase();
+
+  // Reject known non-video patterns
+  for (const pattern of REJECT_PATTERNS) {
+    if (low.includes(pattern)) return false;
+  }
+
+  // Always accept m3u8 links
+  if (isM3u8Url(url)) return true;
+
+  // Accept known player/embed domains
+  if (isPlayerUrl(url)) return true;
+
+  // Accept URLs with embed/player in the path
+  if (/\/(embed|player|e|v|watch|video|stream|play)\//i.test(url)) return true;
+
+  // Accept common video file extensions
+  if (/\.(mp4|webm|mkv|avi|flv|ts|m3u8)/i.test(url)) return true;
+
+  // Reject everything else – this is the key filter that prevents
+  // random page URLs (TMDB images, CDN assets, etc.) from leaking through
+  return false;
+}
+
+function isPlayerUrl(url: string): boolean {
+  const lowUrl = url.toLowerCase();
+  return PLAYER_DOMAINS.some((domain) => lowUrl.includes(domain));
 }
 
 function extractPlayerName(url: string): string {
@@ -393,16 +446,4 @@ function extractLanguage(text: string): string {
   if (t.includes("VO")) return "VO";
   if (t.includes("MULTI")) return "MULTI";
   return "VF";
-}
-
-function isPlayerUrl(url: string): boolean {
-  const playerDomains = [
-    "doodstream", "dood", "streamtape", "mixdrop", "upstream",
-    "vidoza", "voe", "filemoon", "streamvid", "vido", "uqload",
-    "netu", "waaw", "wishonly", "myvi", "sibnet", "sendvid",
-    "vidmoly", "vidcloud", "embedrise", "guccihide", "listeamed",
-    "ahvsh", "playerx", "darkibox",
-  ];
-  const lowUrl = url.toLowerCase();
-  return playerDomains.some((domain) => lowUrl.includes(domain));
 }
