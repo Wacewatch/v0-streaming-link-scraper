@@ -5,6 +5,7 @@ import {
   scrapeTopStreamMovie,
   scrapeTopStreamSeries,
   scrapeTopStreamListing,
+  extractPlayers,
 } from "./topstream";
 
 export async function scrapeMovie(
@@ -156,41 +157,10 @@ export async function bulkScrapeSource(
       }
 
       const html = await res.text();
-      const cheerio = await import("cheerio");
-      const $ = cheerio.load(html);
 
-      // Extract players from the page
-      const players: ScrapeResult["players"] = [];
-
-      $("iframe").each((_, el) => {
-        const src = $(el).attr("src") || $(el).attr("data-src");
-        if (src && src.startsWith("http")) {
-          players.push({
-            player_name: extractPlayerNameFromUrl(src),
-            embed_url: src,
-            quality: "HD",
-            language: "VF",
-            player_type: "iframe",
-          });
-        }
-      });
-
-      $('[data-url], [data-src], [data-link], [data-embed]').each((_, el) => {
-        const url =
-          $(el).attr("data-url") ||
-          $(el).attr("data-src") ||
-          $(el).attr("data-link") ||
-          $(el).attr("data-embed");
-        if (url && url.startsWith("http") && !players.find((p) => p.embed_url === url)) {
-          players.push({
-            player_name: $(el).text().trim() || extractPlayerNameFromUrl(url),
-            embed_url: url,
-            quality: "HD",
-            language: "VF",
-            player_type: "iframe",
-          });
-        }
-      });
+      // Use the shared extractPlayers function (same filtering as single scrape)
+      const extracted = extractPlayers(html, listing.url, listing.title);
+      const players = extracted.players;
 
       if (players.length > 0) {
         // Store without TMDB ID (we store 0 for bulk scrapes, users can link later)
@@ -269,15 +239,4 @@ export async function bulkScrapeSeriesEpisodes(
   };
 }
 
-function extractPlayerNameFromUrl(url: string): string {
-  try {
-    const hostname = new URL(url).hostname;
-    const parts = hostname.split(".");
-    if (parts.length >= 2) {
-      return parts[parts.length - 2].charAt(0).toUpperCase() + parts[parts.length - 2].slice(1);
-    }
-    return hostname;
-  } catch {
-    return "Unknown";
-  }
-}
+
